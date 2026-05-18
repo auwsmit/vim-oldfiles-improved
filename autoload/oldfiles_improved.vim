@@ -1,0 +1,249 @@
+" Oldfiles Improved
+" Author:  Austin W. Smith
+" Version: 1.0
+
+" Credit: Some code adapted from the yegappan's MRU plugin.
+" Source: https://github.com/yegappan/mru
+" License under ../LICENSES/
+
+let s:plugin_win_height = 10
+" put plugin data files wherever vimrc is located.
+let s:plugin_data_dir = fnamemodify(expand($MYVIMRC), ':h') .'/oldfiles-improved/'
+let s:plugin_data_file = s:plugin_data_dir . 'recent_files.txt'
+let s:plugin_temp_name = 'open-recent'. rand()
+let s:plugin_buf_name = '-- Recent Files --'
+let s:plugin_locked = 0 " for not reading files during vimgrep
+let s:recent_files_list = []
+let s:float_win_id = -1
+
+" VARIABLES FOR USER SETTINGS:
+" ============================
+
+" If enabled, backslashes will be converted to forward slashes in the recent files list
+" This helps to prevent duplicate files (e.g. C:\file\foo and C:/file/foo)
+" |
+" (Windows only)
+if !exists('g:oldfiles_improved_convert_backslashes')
+  let g:oldfiles_improved_convert_backslashes = 1
+endif
+
+" If disabled, plugin will use a split window instead of a floating window
+" |
+" (Neovim only)
+if has('nvim') && !exists('g:oldfiles_improved_use_floating_window')
+  let g:oldfiles_improved_use_floating_window = 1
+endif
+
+" If enabled, then recent file list is specially formatted
+" Format: filename > path/to/file
+if !exists('g:oldfiles_improved_fancy_display')
+  let g:oldfiles_improved_fancy_display = 1
+endif
+
+" SCRIPT FUNCTIONS:
+" =================
+
+" For windows, convert backslashes to forward slashes
+fun! s:win_path_fix(path)
+  if !has('win32') || !g:oldfiles_improved_convert_backslashes
+    return a:path
+  endif
+  return substitute(a:path, '\', '/', 'g')
+endfun
+
+" Create a Neovim floating window.
+if has('nvim')
+  fun! s:create_floating_win()
+    let buf_nr = bufexists(s:plugin_buf_name) ?
+          \ bufnr(s:plugin_buf_name) : nvim_create_buf(v:false, v:false)
+    call nvim_buf_set_name(buf_nr, s:plugin_temp_name)
+    " setlocal noswapfile to suppress error about creating a swapfile
+    call nvim_set_option_value('swapfile', v:false,
+          \                    {'scope' : 'local', 'buf' : buf_nr })
+    call nvim_buf_set_name(buf_nr, s:plugin_buf_name)
+    let winwidth = min([120, &columns-(&columns/3)])
+    let opts = {
+          \ 'relative': 'editor',
+          \ 'width': winwidth,
+          \ 'height': s:plugin_win_height,
+          \ 'col': (&columns - winwidth) / 2,
+          \ 'row': (&lines - s:plugin_win_height) / 2,
+          \ 'style': 'minimal',
+          \ 'border': 'single',
+          \ 'title': s:plugin_buf_name
+          \ }
+    let s:float_win_id = nvim_open_win(buf_nr, v:true, opts)
+  endfun
+endif
+
+" Get recent files window number
+" like bufwinnr() but also works with floating window
+fun! s:get_plugin_winnr()
+  let winid = 0
+  if has('nvim') && g:oldfiles_improved_use_floating_window
+    let winid = win_id2win(s:float_win_id)
+    if winid == 0 | let winid = -1 | endif
+  else
+    let winid = bufwinnr(s:plugin_buf_name)
+  endif
+  return winid
+endfun
+
+" Check if the current active window is the recent files list
+fun! s:is_plugin_window_focused()
+  let plugin_window_num = s:get_plugin_winnr()
+  if winnr() == plugin_window_num
+    return 1
+  endif
+  return 0
+endfun
+
+" Buffer-local mappings for the plugin window
+fun! s:create_menu_maps()
+  nnoremap <silent> <buffer> <cr> :call oldfiles_improved#open_file()<cr>
+  nnoremap <silent> <buffer> dd   :call oldfiles_improved#remove_file()<cr>
+  nnoremap <silent> <buffer> q    :call oldfiles_improved#close_menu()<cr>
+endfun
+
+" AUTOLOAD FUNCTIONS:
+" ========================
+
+fun! oldfiles_improved#init()
+  " Create data folder and file if they don't exist
+  if !isdirectory(s:plugin_data_dir)
+    call mkdir(s:plugin_data_dir)
+  endif
+  if !filereadable(s:plugin_data_file)
+    call writefile([], s:plugin_data_file)
+  else
+    " Read recent files into script list
+    let s:recent_files_list = readfile(s:plugin_data_file)
+  endif
+
+  " Setup autocommands
+  augroup oldfiles_improved_plugin
+    au!
+    au BufRead * call oldfiles_improved#add_current_file()
+    au BufWritePost * call oldfiles_improved#add_current_file()
+    au BufEnter * call oldfiles_improved#add_current_file()
+
+    " Prevent :vimgrep from adding unneeded files to the list
+    autocmd QuickFixCmdPre *vimgrep* let s:plugin_locked = 1
+    autocmd QuickFixCmdPost *vimgrep* let s:plugin_locked = 0
+  augroup END
+endfun
+
+" Add the current file to the recent files list
+fun! oldfiles_improved#add_current_file()
+  if s:plugin_locked || s:is_plugin_window_focused() | return | endif
+
+  " skip non-files
+  let current_file = s:win_path_fix(expand('%:p'))
+  if !filereadable(current_file) | return | endif
+
+  " skip special buffer types (usually used by plugins)
+  if !empty(&buftype) | return | endif
+
+  " remove file from list if already listed
+  call filter(s:recent_files_list, 'v:val !=# current_file')
+
+  " add file to top of list, and save
+  call insert(s:recent_files_list, current_file, 0)
+  call writefile(s:recent_files_list, s:plugin_data_file)
+endfun
+
+" Removes a file from the recent files list
+fun! oldfiles_improved#remove_file()
+  if !s:is_plugin_window_focused() | return | endif
+
+  " remove file from list, then save to file
+  let line_num = line('.') - 1
+  let line = remove(s:recent_files_list, line_num)
+  call writefile(s:recent_files_list, s:plugin_data_file)
+
+  " update plugin window buffer
+  setlocal modifiable
+  call deletebufline(s:plugin_buf_name, line_num+1)
+  setlocal nomodifiable
+endfun
+
+" Opens a file from the recent files list:
+fun! oldfiles_improved#open_file()
+  let selected_file = s:win_path_fix(s:recent_files_list[line('.')-1])
+
+  if !filereadable(selected_file)
+    echohl WarningMsg | echo 'Error: Cannot find file.' | echohl None
+  else
+    " close menu and edit file
+    if s:is_plugin_window_focused()
+      call oldfiles_improved#close_menu()
+    endif
+    exec 'silent! keepalt edit '. selected_file
+    silent! normal! g`"
+  endif
+endfun
+
+fun! oldfiles_improved#open_menu()
+  if s:is_plugin_window_focused() | return | endif
+
+  " read recent files from storage
+  let s:recent_files_list = readfile(s:plugin_data_file)
+
+  " nvim allows a floating window,
+  if has('nvim') && g:oldfiles_improved_use_floating_window
+    call s:create_floating_win()
+  else " otherwise open a short window on the bottom (similar to the quickfix list)
+    exec 'keepalt botright '. s:plugin_win_height .'split '. s:plugin_temp_name
+    " setlocal noswapfile to suppress error about creating a swapfile
+    setlocal noswapfile
+    exec 'keepalt file '. s:plugin_buf_name
+  endif
+
+  setlocal filetype=oldfiles_improved
+  setlocal buftype=nofile bufhidden=wipe
+  setlocal number norelativenumber
+  setlocal winfixheight
+
+  " display recent files in the plugin window
+  exec 'silent! keepalt read '. s:plugin_data_file
+  1delete _
+
+  if g:oldfiles_improved_fancy_display
+    for i in range(1, line('$'))
+      let line = getline(i)
+      let filename = fnamemodify(line, ':t')
+      let path = fnamemodify(line, ':p:h')
+      call setline(i, filename. ' > ' .path)
+      syntax match OldfilesImprovedFileName '^.\{-}\ze>'
+      highlight default link OldfilesImprovedFileName Identifier
+    endfor
+  endif
+
+  setlocal nomodifiable
+
+  call s:create_menu_maps()
+
+endfun
+
+fun! oldfiles_improved#close_menu()
+  let plugin_window_num = s:get_plugin_winnr()
+  if winnr() == plugin_window_num
+    wincmd p
+  endif
+  silent! exec plugin_window_num .'wincmd c'
+  if s:get_plugin_winnr() != -1
+    echohl WarningMsg | echo 'Error: Cannot close recent files window.' | echohl None
+  endif
+  " if winnr() == plugin_window_num
+  "   wincmd w
+  " endif
+endfun
+
+fun! oldfiles_improved#toggle_menu()
+  if s:get_plugin_winnr() == -1
+    call oldfiles_improved#open_menu()
+  else
+    call oldfiles_improved#close_menu()
+  endif
+endfun
+
