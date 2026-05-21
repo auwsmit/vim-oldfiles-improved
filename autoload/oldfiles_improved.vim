@@ -1,6 +1,6 @@
 " Oldfiles Improved
 " Author:  Austin W. Smith
-" Version: 1.0
+" Version: 1.0.1
 
 " Credit: Some code adapted from the yegappan's MRU plugin.
 " Source: https://github.com/yegappan/mru
@@ -40,6 +40,11 @@ if !exists('g:oldfiles_improved_fancy_display')
   let g:oldfiles_improved_fancy_display = 1
 endif
 
+" Sets the maximum number of recent files in the list, for performance
+if !exists('g:oldfiles_improved_max_files')
+  let g:oldfiles_improved_max_files = 1000
+endif
+
 " SCRIPT FUNCTIONS:
 " =================
 
@@ -68,11 +73,11 @@ if has('nvim')
           \ 'height': s:plugin_win_height,
           \ 'col': (&columns - winwidth) / 2,
           \ 'row': (&lines - s:plugin_win_height) / 2,
-          \ 'style': 'minimal',
           \ 'border': 'single',
           \ 'title': s:plugin_buf_name
           \ }
     let s:float_win_id = nvim_open_win(buf_nr, v:true, opts)
+    call nvim_set_option_value('winhl', 'Normal:MyHighlight', {'win': s:float_win_id})
   endfun
 endif
 
@@ -91,18 +96,15 @@ endfun
 
 " Check if the current active window is the recent files list
 fun! s:is_plugin_window_focused()
-  let plugin_window_num = s:get_plugin_winnr()
-  if winnr() == plugin_window_num
-    return 1
-  endif
-  return 0
+  return winnr() == s:get_plugin_winnr()
 endfun
 
 " Buffer-local mappings for the plugin window
-fun! s:create_menu_maps()
+fun! s:create_local_buffer_maps()
   nnoremap <silent> <buffer> <cr> :call oldfiles_improved#open_file()<cr>
   nnoremap <silent> <buffer> dd   :call oldfiles_improved#remove_file()<cr>
   nnoremap <silent> <buffer> q    :call oldfiles_improved#close_menu()<cr>
+  exec 'nmap <silent> <buffer> R q:edit '. expand(s:plugin_data_file) .'<cr>'
 endfun
 
 " AUTOLOAD FUNCTIONS:
@@ -133,6 +135,12 @@ fun! oldfiles_improved#init()
   augroup END
 endfun
 
+" Limit recent files to max length, and then write to data file
+fun! oldfiles_improved#save()
+  let s:recent_files_list = s:recent_files_list[: g:oldfiles_improved_max_files-1]
+  call writefile(s:recent_files_list, s:plugin_data_file)
+endfun
+
 " Add the current file to the recent files list
 fun! oldfiles_improved#add_current_file()
   if s:plugin_locked || s:is_plugin_window_focused() | return | endif
@@ -140,6 +148,11 @@ fun! oldfiles_improved#add_current_file()
   " skip non-files
   let current_file = s:win_path_fix(expand('%:p'))
   if !filereadable(current_file) | return | endif
+
+  " if user is manually editing recent files list, read their changes
+  if current_file == s:win_path_fix(s:plugin_data_file)
+    let s:recent_files_list = readfile(s:plugin_data_file)
+  endif
 
   " skip special buffer types (usually used by plugins)
   if !empty(&buftype) | return | endif
@@ -149,7 +162,9 @@ fun! oldfiles_improved#add_current_file()
 
   " add file to top of list, and save
   call insert(s:recent_files_list, current_file, 0)
-  call writefile(s:recent_files_list, s:plugin_data_file)
+
+  " save changes to list
+  call oldfiles_improved#save()
 endfun
 
 " Removes a file from the recent files list
@@ -159,7 +174,7 @@ fun! oldfiles_improved#remove_file()
   " remove file from list, then save to file
   let line_num = line('.') - 1
   let line = remove(s:recent_files_list, line_num)
-  call writefile(s:recent_files_list, s:plugin_data_file)
+  call s:oldfiles_improved#save()
 
   " update plugin window buffer
   setlocal modifiable
@@ -188,6 +203,7 @@ fun! oldfiles_improved#open_menu()
 
   " read recent files from storage
   let s:recent_files_list = readfile(s:plugin_data_file)
+  let s:recent_files_list = s:recent_files_list[: g:oldfiles_improved_max_files-1]
 
   " nvim allows a floating window,
   if has('nvim') && g:oldfiles_improved_use_floating_window
@@ -201,7 +217,6 @@ fun! oldfiles_improved#open_menu()
 
   setlocal filetype=oldfiles_improved
   setlocal buftype=nofile bufhidden=wipe
-  setlocal number norelativenumber
   setlocal winfixheight
 
   " display recent files in the plugin window
@@ -221,22 +236,23 @@ fun! oldfiles_improved#open_menu()
 
   setlocal nomodifiable
 
-  call s:create_menu_maps()
+  call s:create_local_buffer_maps()
 
 endfun
 
 fun! oldfiles_improved#close_menu()
-  let plugin_window_num = s:get_plugin_winnr()
-  if winnr() == plugin_window_num
+  " switch to previous window
+  if s:is_plugin_window_focused()
     wincmd p
   endif
-  silent! exec plugin_window_num .'wincmd c'
+
+  " close plugin window
+  silent! exec s:get_plugin_winnr() .'wincmd c'
+
+  " check for error
   if s:get_plugin_winnr() != -1
     echohl WarningMsg | echo 'Error: Cannot close recent files window.' | echohl None
   endif
-  " if winnr() == plugin_window_num
-  "   wincmd w
-  " endif
 endfun
 
 fun! oldfiles_improved#toggle_menu()

@@ -58,6 +58,9 @@ let g:spear_use_floating_window = 1
 " show a fancier recent files list
 " format: filename > path/to/file
 let g:oldfiles_improved_fancy_display = 1
+
+" set max length for recent file list
+let g:oldfiles_improved_max_files = 1000
 ```
 
 ```lua
