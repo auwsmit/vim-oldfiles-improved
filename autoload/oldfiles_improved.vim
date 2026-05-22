@@ -174,7 +174,7 @@ fun! oldfiles_improved#remove_file()
   " remove file from list, then save to file
   let line_num = line('.') - 1
   let line = remove(s:recent_files_list, line_num)
-  call s:oldfiles_improved#save()
+  call oldfiles_improved#save()
 
   " update plugin window buffer
   setlocal modifiable
