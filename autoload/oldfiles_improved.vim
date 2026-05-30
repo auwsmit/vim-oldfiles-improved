@@ -1,6 +1,6 @@
 " Oldfiles Improved
 " Author:  Austin W. Smith
-" Version: 1.0.1
+" Version: 1.1
 
 " Credit: Some code adapted from the yegappan's MRU plugin.
 " Source: https://github.com/yegappan/mru
@@ -78,6 +78,7 @@ if has('nvim')
           \ }
     let s:float_win_id = nvim_open_win(buf_nr, v:true, opts)
     call nvim_set_option_value('winhl', 'Normal:MyHighlight', {'win': s:float_win_id})
+    setlocal statusline=
   endfun
 endif
 
@@ -101,7 +102,10 @@ endfun
 
 " Buffer-local mappings for the plugin window
 fun! s:create_local_buffer_maps()
-  nnoremap <silent> <buffer> <cr> :call oldfiles_improved#open_file()<cr>
+  nnoremap <silent> <buffer> <cr> :call oldfiles_improved#open_file('edit')<cr>
+  nnoremap <silent> <buffer> s    :call oldfiles_improved#open_file('split')<cr>
+  nnoremap <silent> <buffer> v    :call oldfiles_improved#open_file('vsplit')<cr>
+  nnoremap <silent> <buffer> t    :call oldfiles_improved#open_file('tabedit')<cr>
   nnoremap <silent> <buffer> dd   :call oldfiles_improved#remove_file()<cr>
   nnoremap <silent> <buffer> q    :call oldfiles_improved#close_menu()<cr>
   exec 'nmap <silent> <buffer> R q:edit '. expand(s:plugin_data_file) .'<cr>'
@@ -183,19 +187,19 @@ fun! oldfiles_improved#remove_file()
 endfun
 
 " Opens a file from the recent files list:
-fun! oldfiles_improved#open_file()
+fun! oldfiles_improved#open_file(edit_cmd)
   let selected_file = s:win_path_fix(s:recent_files_list[line('.')-1])
 
   if !filereadable(selected_file)
     echohl WarningMsg | echo 'Error: Cannot find file.' | echohl None
-  else
-    " close menu and edit file
-    if s:is_plugin_window_focused()
-      call oldfiles_improved#close_menu()
-    endif
-    exec 'silent! keepalt edit '. selected_file
-    silent! normal! g`"
   endif
+
+  " close menu and edit file
+  if s:is_plugin_window_focused()
+    call oldfiles_improved#close_menu()
+  endif
+  exec 'silent! keepalt '.a:edit_cmd.' '. selected_file
+  silent! normal! g`"
 endfun
 
 fun! oldfiles_improved#open_menu()
