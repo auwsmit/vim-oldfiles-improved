@@ -1,6 +1,6 @@
 " Oldfiles Improved
 " Author:  Austin W. Smith
-" Version: 1.1
+" Version: 1.1.1
 
 " Credit: Some code adapted from the yegappan's MRU plugin.
 " Source: https://github.com/yegappan/mru
@@ -198,7 +198,7 @@ fun! oldfiles_improved#open_file(edit_cmd)
   if s:is_plugin_window_focused()
     call oldfiles_improved#close_menu()
   endif
-  exec 'silent! keepalt '.a:edit_cmd.' '. selected_file
+  exec 'silent! '.a:edit_cmd.' '. selected_file
   silent! normal! g`"
 endfun
 
